@@ -15,6 +15,7 @@ const SCOPES = [
 const labelName = "AutoReplied";
 
 app.get("/api", async (req, res) => {
+   // Authenticate using the provided credentials file and specified scopes
   const auth = await authenticate({
     keyfilePath: path.join(process.cwd(), "./credentials/credentials.json"),
     scopes: SCOPES,
@@ -24,33 +25,34 @@ app.get("/api", async (req, res) => {
   const response = await gmail.users.labels.list({
     userId: "me",
   });
-  async function getUnrepliesMessages(auth) {
+  async function getUnrepliedMsg(auth) {
     console.log("Get Unreplied Messages");
+
     const gmail = google.gmail({ version: "v1", auth });
     const response = await gmail.users.messages.list({
       userId: "me",
       labelIds: ["INBOX"],
-      q: "-in:chats -from:me -has:userlabels",
+      q: "-label:SENT -in:chats -from:me -has:userlabels",
     });
     return response.data.messages || [];
   }
 
   async function addLabel(auth, message, labelId) {
+    console.log("Add Label");
     const gmail = google.gmail({ version: "v1", auth });
     await gmail.users.messages.modify({
       userId: "me",
       id: message.id,
       requestBody: {
         addLabelIds: [labelId],
-        removeLabelIds: ["INBOX"],
       },
     });
   }
 
   async function createLabel(auth) {
     console.log("Create Label");
-
     const gmail = google.gmail({ version: "v1", auth });
+    // Attempt to create a new label
     try {
       const response = await gmail.users.labels.create({
         userId: "me",
@@ -62,6 +64,7 @@ app.get("/api", async (req, res) => {
       });
       return response.data.id;
     } catch (error) {
+      // If label already exists, return its id
       if (error.code === 409) {
         const response = await gmail.users.labels.list({
           userId: "me",
@@ -80,21 +83,28 @@ app.get("/api", async (req, res) => {
     console.log("Send Reply");
 
     const gmail = google.gmail({ version: "v1", auth });
+    //Metadata (subject and sender) of the original message
     const res = await gmail.users.messages.get({
       userId: "me",
       id: message.id,
       format: "metadata",
       metadataHeaders: ["Subject", "From"],
     });
+    //Extract subject and sender information
     const subject = res.data.payload.headers.find(
       (header) => header.name === "Subject"
     ).value;
     const from = res.data.payload.headers.find(
       (header) => header.name === "From"
     ).value;
+
+    //Extract the email address to which the reply will be sent
     const replyTo = from.match(/<(.*)>/)[1];
+
     const replySubject = subject.startsWith("Re:") ? subject : `Re: ${subject}`;
-    const replyBody = `Hello, \n\nThank you for reaching out to me! I appreciate your email and the time you've taken to connect with me. I'll get back to you soon.\n\n Best, \nNisarg Thakkar`;
+    const replyBody = `Hello, \n\nThank you for reaching out to me! I appreciate your email and the time you've taken to connect with me. I'll get back to you soon.\n\nBest Regards, \nNisarg Thakkar`;
+
+    //Raw message with headers and body
     const rawMessage = [
       `From: me`,
       `To: ${replyTo}`,
@@ -104,11 +114,14 @@ app.get("/api", async (req, res) => {
       "",
       replyBody,
     ].join("\n");
+
+    // Encoding the raw message to base64 format for Gmail API
     const encodedMessage = Buffer.from(rawMessage)
       .toString("base64")
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
       .replace(/=+$/, "");
+
     await gmail.users.messages.send({
       userId: "me",
       requestBody: {
@@ -121,8 +134,8 @@ app.get("/api", async (req, res) => {
     const labelId = await createLabel(auth);
     console.log(`Label has been created:  ${labelId}`);
     setInterval(async () => {
-      const messages = await getUnrepliesMessages(auth);
-      console.log(`found ${messages.length} unreplied messages`);
+      const messages = await getUnrepliedMsg(auth);
+      console.log(`Unreplied Messages Count: ${messages.length} `);
 
       for (const message of messages) {
         await sendReply(auth, message);
@@ -131,7 +144,7 @@ app.get("/api", async (req, res) => {
         await addLabel(auth, message, labelId);
         console.log(`Added Label: ${message.id}`);
       }
-    }, Math.floor(Math.random() * (100 - 45 + 1) + 45) * 1000); 
+    }, Math.floor(Math.random() * (120 - 45 + 1) + 45) * 1000); 
     // Random interval between 45 and 120 seconds
   }
 
